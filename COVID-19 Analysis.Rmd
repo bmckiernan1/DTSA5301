@@ -1,0 +1,235 @@
+---
+title: "Covid-19 Analysis"
+author: "B McKiernan"
+date: "5/25/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction and Data Source
+
+The Covid-19 pandemic has completely upended life over the past 14 months.  What has been interesting, at least in the United States, is the uneven approach by various governments - local, state, and federal - to addressing the emergency and differing opinions on the severity of the virus and the pandemic itself. The United States is a very geographically and culturally diverse nation with each region having different sensibilities and ways of living.  While there is significant overlap, the distinctions among the regions are also striking. Looking at the number of cases and deaths within each region and in the United States as whole will give some insight into how, when, and to what degree regions of the United States were effected by the Covid-19 virus.  This analysis will also include a comparison among the regions of the United States of America.
+
+In order to explore these ideas, data from John's Hopkins github repository (https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data) will be analyzed.  Among the many data sets present are two which have time-series data showing the location (county, state, latitude and longitude) for all cases of COVID-19 infections and deaths in the United States. These two will be used in order to explore and gain understanding into geographic trends in COVID-19 cases and deaths.
+
+# Data Cleaning and Processing
+
+The data was read in and the variables analyzed for both data sets.
+
+```{r Reading in Data}
+url_1 <- "https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv"
+Cases <- read.csv(url_1)
+url_2 <- "https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv"
+Deaths <- read.csv(url_2)
+
+```
+
+```{r Loading Libraries, include=FALSE}
+library(tidyverse)
+library(lubridate)
+```
+
+Immediately, it became clear that tidying would be required (output of initial variables not shown for space).  The many columns containing data not pertinent to this analysis were removed and the columns representing the dates were pivoted to rows for both data sets.  The entries for the dates were edited and reformatted as Date objects for easier use in analysis. Finally, the two data sets were joined to provide a common location for the data and for use of population data. A summary of the composition of the initial files is provided in the appendix.
+
+```{r Data Cleaning, results='hide'}
+#Removing unnecessary columns & reformatting Date column
+US_cases <- Cases %>%
+     select(-c(UID, iso2, iso3, FIPS, Lat, Long_, code3, Combined_Key)) %>%
+     pivot_longer(cols=-c(Admin2, Province_State, Country_Region), 
+                  names_to='Date', values_to = "Cases")
+
+US_cases <- US_cases %>%
+     mutate(Date = str_remove(Date, 'X')) %>%
+     mutate(Date = mdy(Date))
+
+US_deaths <- Deaths %>%
+     select(-c(UID, iso2, iso3, FIPS, Lat, Long_, code3, Combined_Key)) %>%
+     pivot_longer(cols=-c(Admin2, Province_State, Country_Region, Population), 
+                  names_to='Date', values_to = "Deaths")
+
+US_deaths <- US_deaths %>%
+     mutate(Date = str_remove(Date, 'X')) %>%
+     mutate(Date = mdy(Date))
+
+#Joining US_deaths and US_cases
+US_combined <- full_join(US_cases, US_deaths)
+```
+
+# Regional Analysis
+
+## New Cases and Deaths
+
+In order to identify regional trends, it is necessary to partition the 50 states and the District of Columbia into regions.  While not having equal populations, the regions below do comprise distinct geographic regions with cultural distinctions.  Since much is made of the regional differences, states were grouped balancing geographic proximity and cultural commonality.
+
+```{r Cases by Region}
+#Region of country based on state
+NE_MA <- c("Maine", "New Hampshire", "Vermont", "New York", "Pennsylvania",
+           "Massachusetts", "Connecticut", "Rhode Island", "New Jersey",
+           "Delaware", "Maryland", "District of Columbia")
+South <- c("Virginia", "Kentucky", "Tennessee", "North Carolina", "South Carolina",
+           "Georgia", "Florida", "Alabama", "Mississippi", "Louisiana",
+           "Texas", "Arkansas", "West Virginia")
+MW_PL <- c("Ohio", "Indiana", "Michigan", "Wisconsin", "Minnesota", "Iowa",
+           "Missouri","Oklahoma", "Kansas", "Nebraska", "North Dakota",
+           "South Dakota", "Illinois")
+West <- c("New Mexico", "Arizona", "California", "Hawaii", "Alaska", "Oregon",
+          "Washington","Idaho", "Montana", "Wyoming", "Colorado", "Utah", "Nevada")
+```
+
+Grouping by State and Date allowed for the total number of cases and deaths in each state on each date to be calculated.  New columns were added and included the number of new cases (by comparing each dates' cases and deaths to the day before using the lag() function), deaths, and the region each state is located - based on the lists above.  Filtering out rows with zero cases resulted in data only adding to potential analysis.  The added Region column allowed for visual comparison and contrast in plots and numeric and modeling analysis. Finally, those rows whose region was 'Other' were removed. The data set had cases for US territories and a couple cruise ships which were not included in the analysis.
+
+```{r State Analysis, echo=TRUE, results='hide'}
+#Region Analysis - 
+State_data <- US_combined %>% group_by(Province_State, Date) %>% 
+                summarize(Cases = sum(Cases),
+                          Deaths = sum(Deaths),
+                          Population = sum(Population)) %>%
+                filter(Cases>0) 
+
+Region_data <- State_data %>%
+                mutate(New_cases = Cases - lag(Cases, default=0),
+                       New_deaths = Deaths - lag(Deaths, default = 0),
+                       Region = ifelse(is.element(Province_State, NE_MA), "NE/MA",
+                                ifelse(is.element(Province_State, South), "South",
+                                ifelse(is.element(Province_State, MW_PL), "MW/PL",
+                                ifelse(is.element(Province_State, West), "West",
+                                                            "Other"))))) %>%
+                filter(Region != "Other") 
+```
+
+```{r Plots of New cases and deaths by date}
+
+ggplot(data=Region_data, alpha = 0.75) + 
+        geom_point(aes(x=Date, y=New_cases, color=Region))+
+        facet_grid(row=vars(Region))+
+        labs(title='New Cases by Date',
+             x='Date',
+             y='Number of New Cases')
+
+ggplot(data=Region_data) + 
+        geom_point(aes(x=Date, y=New_deaths, color=Region), alpha=0.75)+
+        facet_grid(row=vars(Region))+
+        labs(title='New Deaths by Date',
+             x='Date',
+             y='Number of New deaths')
+```
+
+These graphs give insight into the locations of new cases over time, specifically during times of outbreaks.  Each peak in both charts represent an "outbreak" of cases during the pandemic.  It can be seen that geographic regions correspond to each peak:  the first peak coming from New England and Mid-Atlantic states, the second is a mixture of southern and western states, and the third a mixture of all regions.  Interestingly, the Midwest and Plains states only saw minor increases in numbers while the other regions saw distinct times of increases case and death counts.  It can be noted that as the pandemic continued, the diversity of regions involved in each outbreak increased and tended to change. This indicates that the effects of the pandemic were felt across all geographic regions and each region had experience with outbreak conditions. 
+
+It is interesting to see the gap within the cases for the West region around January 2021.  There is a similar, though much less pronounced, gap in the Deaths plot for the West region at the same time.  This possibly indicates that one state or state(s) within the West region were more effected by the increasing case count at that time than others.  
+
+
+## Modeling Cases and Deaths
+
+From the initial data set, entries were grouped by State and Date and the total new cases calculated for each day and each state.  Grouping a second time by state resulted in a single total for each state encompassing the the entirety of the pandemic.  Additional columns were added providing the geographic region each state is located and the cases and deaths per million.  Those not located in the four main regions labeled 'Other' were removed.  
+
+```{r Totals by State}
+Totals_by_state <- State_data %>%
+                mutate(New_cases = Cases - lag(Cases, default=0),
+                       New_deaths = Deaths - lag(Deaths, default = 0))
+
+Totals_by_state <-Totals_by_state %>% group_by(Province_State) %>%
+        summarize(Total_Cases = sum(New_cases),
+                  Total_Deaths = sum(New_deaths),
+                  Population=mean(Population)) %>%
+        mutate(Region = ifelse(is.element(Province_State, NE_MA), "NE/MA",
+                        ifelse(is.element(Province_State, South), "South",
+                        ifelse(is.element(Province_State, MW_PL), "MW/PL",
+                        ifelse(is.element(Province_State, West), "West",
+                                                    "Other")))),
+               Cases_per_mil = Total_Cases * 1000000 / Population,
+               Deaths_per_mil = Total_Deaths * 1000000 / Population) %>%
+        filter(Region != "Other") 
+```
+
+## Modeling and Plotting
+
+Linear models were created for a number of data sub-groups: the US as a whole and the four regions defined above.  Each linear model describes the linear relationship between Cases per million and Deaths per million.  All five grouping show similar, positive associations and approximate linear trends within their scatterplots and confirmed through subsequent modeling. 
+
+
+```{r Plots of Cases per milltion and Deaths per million}
+ggplot(data=Totals_by_state, aes(x=Cases_per_mil, y=Deaths_per_mil))+
+        geom_point()+
+        geom_smooth(method='lm')+
+        labs(title='Deaths per Million vs Cases per Million for the US',
+             x='Cases per million',
+             y='Deaths per million')
+
+ggplot(data=Totals_by_state, aes(x=Cases_per_mil, y=Deaths_per_mil,color=Region))+
+        geom_point()+
+        facet_grid(row=vars(Region))+
+        geom_smooth(method='lm')+
+        labs(title='Deaths per Million vs Cases per Million by Region',
+             x='Cases per million',
+             y='Deaths per million')
+```
+
+
+Examining the scatter plots above reveal some interesting results.  First, it is clear that a positive trend exists between cases per million and deaths per million.  This is expected and makes sense.  When dealing with a lethal virus, it can be expected that as cases rise so will deaths.  When broken down by region, more patterns emerge.  The Midwest and Plains region had the most concentrated high number of cases per million while the Western region has much more spread, indicating that it is the most diverse region in terms of cases per million.  The Northeast/Mid-Atlantic region saw the most variation for both cases and deaths per million.
+
+Maybe most interestingly, within each region there were no outliar states.  Each grouping, roughly, followed the linear models for the region.  This gives an indication that 1) the states were grouped in to regions somewhat appropriately, and 2) each region followed their trend with little exception.
+
+```{r}
+US_model <- lm(Totals_by_state$Deaths_per_mil~Totals_by_state$Cases_per_mil)
+MW_data <- Totals_by_state %>% filter(Region == 'MW/PL')
+MW_model <-lm(MW_data$Deaths_per_mil~MW_data$Cases_per_mil)
+South_data <- Totals_by_state %>% filter(Region == 'South')
+South_model <-lm(South_data$Deaths_per_mil~South_data$Cases_per_mil)
+West_data <- Totals_by_state %>% filter(Region == 'West')
+West_model <-lm(West_data$Deaths_per_mil~West_data$Cases_per_mil)
+NE_data <- Totals_by_state %>% filter(Region == 'NE/MA')
+NE_model <-lm(NE_data$Deaths_per_mil~NE_data$Cases_per_mil)
+
+labels <- c('US', 'Midwest/Plains','Northeast/MidAtlantic', 'South', 'West')
+R2 <- c(round(summary(US_model)$r.squared,4),
+        round(summary(MW_model)$r.squared,4),
+        round(summary(NE_model)$r.squared,4),
+        round(summary(South_model)$r.squared,4),
+        round(summary(West_model)$r.squared,4))
+Slopes <- c(round(as.numeric(US_model$coef[2]),4),
+            round(as.numeric(MW_model$coef[2]),4),
+            round(as.numeric(NE_model$coef[2]),4),
+            round(as.numeric(South_model$coef[2]),4),
+            round(as.numeric(West_model$coef[2]),4))
+
+summary_info <- data.frame(labels,R2,Slopes)
+
+knitr::kable(summary_info[1:5,1:3], caption='Summary of Regression Models',
+             col.names=c('Region','R-Sq','Slope'), align='c')
+```
+
+Comparing the outcomes of the linear models provides some more clarity to the analysis from the plots above.  For the US as a whole, the linear model was moderately predictive (R-Sq = .4097) and showed a relationship of approximate 1 additional death per million for every 10 cases per million, on average.  Looking at the regional models, Northeast and the Mid-Atlantic region had the most predictive model (R-Sq = .75) and the highest rate of predicted deaths per million by cases per million (slope = 0.025).  The other three regions had models which varied in their predictive power, but were all worse than the US as a whole. While having similar rates of about 1 death per million for every additional 10 cases per million on average, their predictive differences indicate that other factors are effecting the rate of deaths per million beyond cases per million.  Putting it together, while similar slopes for all the models are seen, only the Northeast region model provides some predictive understanding for how deaths per million can be determined from cases per million.
+
+# Conclusion, Questions, and Bias
+
+America is a geographically and culturally diverse nation.  It therefore should not be surprising that different regions felt the effects of the pandemic at different times and to different degrees.  It can be noted that those regions with many large, urban areas - Northeast/Mid-Atlantic, West, and South - were the regions feeling the outbreak times more acutely.  The Northeast/Mid-Atlantic region felt the early effects most strongly, possibly due to the number of crowded, urban areas, colder spring weather conditions, and limited knowledge of the virus at that moment in time. At time went on, other regions felt similar but less pronounced effects, possibly due to increased knowledge of the virus, how to deal with cases, and improved weather.  The spike in the winter on 2021 effected all regions but was felt strongly in the West.
+
+The regional distinctions were also present in the linear modeling analysis.  Only the Northeast region provided a model capable of strong, confident prediction.  Again, we can subscribe some of this to cultural similarity and close geographic proximity of that region. The other regions had more geographic spread (account for a variety of weather conditions) and potentially had more cultural and political variety allowing for more variation within these regional data groupings and therefore less predictive models.
+
+Further analysis is definitely needed to get more meaningful results.  Increasing the number of regions to six or seven could create regions with more common political and weather situations.  Given the effect these factors have shown on dealing with the virus, accounting for them better could yield different and more more meaningful results.
+
+A major source of bias is the division of the states in to regions. Divisions accounting for weather, politics, and geographic similarity (or other potential contributing factors) better could remove many confounding variables from the analysis. A more objective metric to make distinctions would be necessary to provide more objective, meaningful results.  There is also some element of confirmation bias as so much of these ideas have been widely publicized.  
+
+# Appendix and Session Information
+
+```{r Session Information}
+summary(Cases)
+
+summary(Deaths)
+
+summary(US_cases)
+
+summary(US_deaths)
+
+summary(US_combined)
+
+sessionInfo()
+```
+
+
+
+
+
